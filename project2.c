@@ -60,6 +60,9 @@ int dequeue(struct task_queue *tq, char *buf) {
     assert(tq->head->abspath != NULL);
 
     strncpy(buf, tq->head->abspath, MAX_ABSPATH_LEN);
+    free(tq->head->abspath);
+    free(tq->head);
+
     if (tq->head == tq->tail) {
         tq->head = NULL;
         tq->tail = NULL;
@@ -104,7 +107,9 @@ int main(int argc, char *argv[]) {
     while (!is_empty(&task_queue)) {
         char abspath[MAX_ABSPATH_LEN];
         char cmd[1024];
-        dequeue(&task_queue, abspath);
+
+        if (dequeue(&task_queue, abspath) == -1)
+            continue;
 
         strncpy(cmd, base_cmd, base_cmd_len+1);
         strncat(cmd, "\"", 2);
