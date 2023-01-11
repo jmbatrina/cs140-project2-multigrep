@@ -70,9 +70,12 @@ int dequeue(struct task_queue *tq, char *buf) {
     return 0;
 }
 
+int is_empty(struct task_queue *tq) {
+    return tq->head == NULL;
+}
+
 int main(int argc, char *argv[]) {
     setvbuf(stdout, NULL, _IONBF, 0);
-    init_queue(&task_queue);
 
     const char *grep_bin = "grep";
     const int N = strtol(argv[1], NULL, 10);
@@ -85,21 +88,34 @@ int main(int argc, char *argv[]) {
     printf("searchstr: %s\n", searchstr);
     printf("\n");
 
+    init_queue(&task_queue);
     enqueue(&task_queue, rootpath);
-    char abspath[MAX_ABSPATH_LEN];
-    dequeue(&task_queue, abspath);
 
-    // construct command: grep > /dev/null "searchstr" "rootpath"
-    char buf[1024];
-    strncpy(buf, grep_bin, 5);
-    strncat(buf, " \"", 3);
-    // strncat(buf, " > /dev/null \"", 15);
-    strncat(buf, searchstr, MAX_ABSPATH_LEN);
-    strncat(buf, "\" \"", 4);
-    strncat(buf, abspath, MAX_ABSPATH_LEN);
-    strncat(buf, "\"", 2);
+    // construct base command: grep > /dev/null "searchstr"
+    char base_cmd[1024];
+    strncpy(base_cmd, grep_bin, 5);
+    strncat(base_cmd, " \"", 3);
+    // strncat(base_cmd, " > /dev/null \"", 15);
+    strncat(base_cmd, searchstr, MAX_ABSPATH_LEN);
+    strncat(base_cmd, "\" ", 3);
+    int base_cmd_len = strlen(base_cmd);
 
-    printf("Command: %s\n", buf);
+    int hits = 0;
+    while (!is_empty(&task_queue)) {
+        char abspath[MAX_ABSPATH_LEN];
+        char cmd[1024];
+        dequeue(&task_queue, abspath);
 
-    return system(buf);
+        strncpy(cmd, base_cmd, base_cmd_len+1);
+        strncat(cmd, "\"", 2);
+        strncat(cmd, abspath, MAX_ABSPATH_LEN);
+        strncat(cmd, "\"", 2);
+
+        printf("Command: %s\n", cmd);
+        if (system(cmd) == 0) {
+            ++hits;
+        }
+    }
+
+    return hits;
 }
