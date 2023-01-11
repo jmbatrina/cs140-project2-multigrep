@@ -103,13 +103,12 @@ int main(int argc, char *argv[]) {
     // construct base command: grep > /dev/null "searchstr"
     char base_cmd[1024];
     strncpy(base_cmd, grep_bin, 5);
-    strncat(base_cmd, " \"", 3);
-    // // strncat(base_cmd, " > /dev/null \"", 15);
+    // // strncat(base_cmd, " \"", 3);
+    strncat(base_cmd, " > /dev/null \"", 15);
     strncat(base_cmd, searchstr, MAX_ABSPATH_LEN);
     strncat(base_cmd, "\" ", 3);
     int base_cmd_len = strlen(base_cmd);
 
-    int hits = 0;
     while (!is_empty(&task_queue)) {
         char curpath[MAX_ABSPATH_LEN];
         char cmd[1024];
@@ -125,24 +124,25 @@ int main(int argc, char *argv[]) {
             if (strcmp(base_name, ".") == 0 || strcmp(base_name, "..") == 0)
                 continue;
 
+            char *entry_abspath = make_abspath(curpath, base_name);
             if (entry->d_type == DT_DIR) {
-                char *child_dir = make_abspath(curpath, base_name);
-                enqueue(&task_queue, child_dir);
-                printf("[0] ENQUEUE %s\n", child_dir);
+                enqueue(&task_queue, entry_abspath);
+                printf("[0] ENQUEUE %s\n", entry_abspath);
+            } else {
+                strncpy(cmd, base_cmd, base_cmd_len+1);
+                strncat(cmd, "\"", 2);
+                strncat(cmd, entry_abspath, MAX_ABSPATH_LEN);
+                strncat(cmd, "\"", 2);
+
+                if (system(cmd) == 0) {
+                    printf("[0] PRESENT %s\n", entry_abspath);
+                } else {
+                    printf("[0] ABSENT %s\n", entry_abspath);
+                }
             }
         }
         closedir(curdir);
-
-        strncpy(cmd, base_cmd, base_cmd_len+1);
-        strncat(cmd, "\"", 2);
-        strncat(cmd, curpath, MAX_ABSPATH_LEN);
-        strncat(cmd, "\"", 2);
-
-        printf("Command: %s\n", cmd);
-        // if (system(cmd) == 0) {
-        //     ++hits;
-        // }
     }
 
-    return hits;
+    return 0;
 }
