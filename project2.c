@@ -24,18 +24,22 @@ void init_queue(struct task_queue *tq) {
     tq->tail = NULL;
 }
 
-void enqueue(struct task_queue *tq, const char *path) {
-    assert(tq != NULL);
-    assert(path != NULL);
-
+char *make_abspath(const char *path, const char * parent_abspath) {
     char *abspath = (char *) malloc(MAX_ABSPATH_LEN * sizeof(char));
     if (path[0] == '/') {
         strncpy(abspath, path, MAX_ABSPATH_LEN);
     } else {
-        getcwd(abspath, MAX_ABSPATH_LEN);
+        strncpy(abspath, parent_abspath, MAX_ABSPATH_LEN);
         strncat(abspath, "/", 2);
         strncat(abspath, path, MAX_ABSPATH_LEN);
     }
+
+    return abspath;
+}
+
+void enqueue(struct task_queue *tq, char *abspath) {
+    assert(tq != NULL);
+    assert(abspath != NULL);
 
     struct task_node *new = (struct task_node *) malloc(sizeof(struct task_node));
     new->abspath = abspath;
@@ -92,13 +96,14 @@ int main(int argc, char *argv[]) {
     printf("\n");
 
     init_queue(&task_queue);
-    enqueue(&task_queue, rootpath);
+    char buf[MAX_ABSPATH_LEN];
+    enqueue(&task_queue, make_abspath(rootpath, getcwd(buf, MAX_ABSPATH_LEN)));
 
     // construct base command: grep > /dev/null "searchstr"
     char base_cmd[1024];
     strncpy(base_cmd, grep_bin, 5);
     strncat(base_cmd, " \"", 3);
-    // strncat(base_cmd, " > /dev/null \"", 15);
+    // // strncat(base_cmd, " > /dev/null \"", 15);
     strncat(base_cmd, searchstr, MAX_ABSPATH_LEN);
     strncat(base_cmd, "\" ", 3);
     int base_cmd_len = strlen(base_cmd);
