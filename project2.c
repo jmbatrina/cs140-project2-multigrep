@@ -24,7 +24,7 @@ void init_queue(struct task_queue *tq) {
     tq->tail = NULL;
 }
 
-char *make_abspath(const char *path, const char * parent_abspath) {
+char *make_abspath(const char * parent_abspath, const char *path) {
     char *abspath = (char *) malloc(MAX_ABSPATH_LEN * sizeof(char));
     if (path[0] == '/') {
         strncpy(abspath, path, MAX_ABSPATH_LEN);
@@ -58,14 +58,14 @@ int dequeue(struct task_queue *tq, char *buf) {
     assert(tq != NULL);
     assert(buf != NULL);
 
-    if (tq->head == NULL) {
+    struct task_node *removed = tq->head;
+    if (removed == NULL) {
         return -1;
     }
-    assert(tq->head->abspath != NULL);
 
-    strncpy(buf, tq->head->abspath, MAX_ABSPATH_LEN);
-    free(tq->head->abspath);
-    free(tq->head);
+    assert(removed->abspath != NULL);
+    strncpy(buf, removed->abspath, MAX_ABSPATH_LEN);
+    free(removed->abspath);
 
     if (tq->head == tq->tail) {
         tq->head = NULL;
@@ -73,6 +73,7 @@ int dequeue(struct task_queue *tq, char *buf) {
     } else {
         tq->head = tq->head->next;
     }
+    free(removed);
 
     return 0;
 }
@@ -97,7 +98,7 @@ int main(int argc, char *argv[]) {
 
     init_queue(&task_queue);
     char buf[MAX_ABSPATH_LEN];
-    enqueue(&task_queue, make_abspath(rootpath, getcwd(buf, MAX_ABSPATH_LEN)));
+    enqueue(&task_queue, make_abspath(getcwd(buf, MAX_ABSPATH_LEN), rootpath));
 
     // construct base command: grep > /dev/null "searchstr"
     char base_cmd[1024];
@@ -110,21 +111,37 @@ int main(int argc, char *argv[]) {
 
     int hits = 0;
     while (!is_empty(&task_queue)) {
-        char abspath[MAX_ABSPATH_LEN];
+        char curpath[MAX_ABSPATH_LEN];
         char cmd[1024];
 
-        if (dequeue(&task_queue, abspath) == -1)
+        if (dequeue(&task_queue, curpath) == -1)
             continue;
+
+        DIR *curdir = opendir(curpath);
+        struct dirent *entry;
+        while ((entry = readdir(curdir)) != NULL) {
+            char *base_name = strrchr(entry->d_name, '/');
+            base_name = base_name ? base_name+1 : entry->d_name;
+            if (strcmp(base_name, ".") == 0 || strcmp(base_name, "..") == 0)
+                continue;
+
+            if (entry->d_type == DT_DIR) {
+                char *child_dir = make_abspath(curpath, base_name);
+                enqueue(&task_queue, child_dir);
+                printf("[0] ENQUEUE %s\n", child_dir);
+            }
+        }
+        closedir(curdir);
 
         strncpy(cmd, base_cmd, base_cmd_len+1);
         strncat(cmd, "\"", 2);
-        strncat(cmd, abspath, MAX_ABSPATH_LEN);
+        strncat(cmd, curpath, MAX_ABSPATH_LEN);
         strncat(cmd, "\"", 2);
 
         printf("Command: %s\n", cmd);
-        if (system(cmd) == 0) {
-            ++hits;
-        }
+        // if (system(cmd) == 0) {
+        //     ++hits;
+        // }
     }
 
     return hits;
