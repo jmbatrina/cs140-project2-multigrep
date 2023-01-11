@@ -106,6 +106,7 @@ void worker(void *vid) {
         if (dequeue(&task_queue, curpath) == -1)
             continue;
 
+        printf("[%d] DIR %s\n", id, curpath);
         DIR *curdir = opendir(curpath);
         struct dirent *entry;
         while ((entry = readdir(curdir)) != NULL) {
