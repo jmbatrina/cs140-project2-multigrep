@@ -85,7 +85,8 @@ int is_empty(struct task_queue *tq) {
     return tq->head == NULL;
 }
 
-void worker(int id) {
+void worker(void *vid) {
+    int id = *((int *) vid);
     while (!is_empty(&task_queue)) {
         char curpath[MAX_ABSPATH_LEN];
         char cmd[1024];
@@ -148,7 +149,15 @@ int main(int argc, char *argv[]) {
     strncat(base_cmd, "\" ", 3);
     base_cmd_len = strlen(base_cmd);
 
-    worker(0);
+    pthread_t tid[N];
+    int id[N];
+    for (int i = 0; i < N; ++i) {
+        id[i] = i;
+        pthread_create(&tid[i], NULL, (void *)worker, &id[i]);
+    }
+    for (int i = 0; i < N; ++i) {
+        pthread_join(tid[i], NULL);
+    }
 
     return 0;
 }
