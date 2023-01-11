@@ -18,11 +18,13 @@ struct task_node {
 };
 
 struct task_queue {
+    pthread_mutex_t lock;
     struct task_node *head;
     struct task_node *tail;
 } task_queue;
 
 void init_queue(struct task_queue *tq) {
+    pthread_mutex_init(&tq->lock, NULL);
     tq->head = NULL;
     tq->tail = NULL;
 }
@@ -45,6 +47,12 @@ void enqueue(struct task_queue *tq, char *abspath) {
     assert(abspath != NULL);
 
     struct task_node *new = (struct task_node *) malloc(sizeof(struct task_node));
+    if (new == NULL) {
+        fprintf(stderr, "Enqueue: malloc() failed\n");
+        return;
+    }
+
+    pthread_mutex_lock(&tq->lock);
     new->abspath = abspath;
     new->next = NULL;
 
@@ -55,30 +63,34 @@ void enqueue(struct task_queue *tq, char *abspath) {
         tq->tail->next = new;
         tq->tail = new;
     }
+    pthread_mutex_unlock(&tq->lock);
 }
 
 int dequeue(struct task_queue *tq, char *buf) {
     assert(tq != NULL);
     assert(buf != NULL);
 
+    int retval = 0;
+    pthread_mutex_lock(&tq->lock);
     struct task_node *removed = tq->head;
     if (removed == NULL) {
-        return -1;
-    }
-
-    assert(removed->abspath != NULL);
-    strncpy(buf, removed->abspath, MAX_ABSPATH_LEN);
-    free(removed->abspath);
-
-    if (tq->head == tq->tail) {
-        tq->head = NULL;
-        tq->tail = NULL;
+        retval = -1;
     } else {
-        tq->head = tq->head->next;
-    }
-    free(removed);
+        assert(removed->abspath != NULL);
+        strncpy(buf, removed->abspath, MAX_ABSPATH_LEN);
+        free(removed->abspath);
 
-    return 0;
+        if (tq->head == tq->tail) {
+            tq->head = NULL;
+            tq->tail = NULL;
+        } else {
+            tq->head = tq->head->next;
+        }
+        free(removed);
+    }
+    pthread_mutex_unlock(&tq->lock);
+
+    return retval;
 }
 
 int is_empty(struct task_queue *tq) {
