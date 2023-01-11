@@ -66,6 +66,8 @@ int dequeue(struct task_queue *tq, char *buf) {
     } else {
         tq->head = tq->head->next;
     }
+
+    return 0;
 }
 
 int main(int argc, char *argv[]) {
