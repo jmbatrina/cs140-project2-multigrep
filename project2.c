@@ -11,6 +11,8 @@
 
 char base_cmd[1024];
 int base_cmd_len;
+int is_done;
+int N;
 
 struct task_node {
     char *abspath;
@@ -19,12 +21,14 @@ struct task_node {
 
 struct task_queue {
     pthread_mutex_t lock;
+    int numIdleWorkers;
     struct task_node *head;
     struct task_node *tail;
 } task_queue;
 
 void init_queue(struct task_queue *tq) {
     pthread_mutex_init(&tq->lock, NULL);
+    tq->numIdleWorkers = 0;
     tq->head = NULL;
     tq->tail = NULL;
 }
@@ -97,50 +101,84 @@ int is_empty(struct task_queue *tq) {
     return tq->head == NULL;
 }
 
-void worker(void *vid) {
-    int id = *((int *) vid);
-    while (!is_empty(&task_queue)) {
-        char curpath[MAX_ABSPATH_LEN];
-        char cmd[1024];
+void incrementIdle(struct task_queue *tq) {
+    pthread_mutex_lock(&tq->lock);
+    ++tq->numIdleWorkers;
+    pthread_mutex_unlock(&tq->lock);
+}
 
-        if (dequeue(&task_queue, curpath) == -1)
+void decrementIdle(struct task_queue *tq) {
+    pthread_mutex_lock(&tq->lock);
+    --tq->numIdleWorkers;
+    pthread_mutex_unlock(&tq->lock);
+}
+
+int grepNextDir(int id) {
+    char curpath[MAX_ABSPATH_LEN];
+    char cmd[1024];
+
+    if (is_empty(&task_queue) || dequeue(&task_queue, curpath) == -1)
+        return 0;
+
+    int didWork = 0;
+    printf("[%d] DIR %s\n", id, curpath);
+    DIR *curdir = opendir(curpath);
+    struct dirent *entry;
+    while ((entry = readdir(curdir)) != NULL) {
+        char *base_name = strrchr(entry->d_name, '/');
+        base_name = base_name ? base_name+1 : entry->d_name;
+        if (strcmp(base_name, ".") == 0 || strcmp(base_name, "..") == 0)
             continue;
 
-        printf("[%d] DIR %s\n", id, curpath);
-        DIR *curdir = opendir(curpath);
-        struct dirent *entry;
-        while ((entry = readdir(curdir)) != NULL) {
-            char *base_name = strrchr(entry->d_name, '/');
-            base_name = base_name ? base_name+1 : entry->d_name;
-            if (strcmp(base_name, ".") == 0 || strcmp(base_name, "..") == 0)
-                continue;
+        char *entry_abspath = make_abspath(curpath, base_name);
+        if (entry->d_type == DT_DIR) {
+            enqueue(&task_queue, entry_abspath);
+            printf("[%d] ENQUEUE %s\n", id, entry_abspath);
+            didWork = 1;
+        } else {
+            strncpy(cmd, base_cmd, base_cmd_len+1);
+            strncat(cmd, "\"", 2);
+            strncat(cmd, entry_abspath, MAX_ABSPATH_LEN);
+            strncat(cmd, "\"", 2);
 
-            char *entry_abspath = make_abspath(curpath, base_name);
-            if (entry->d_type == DT_DIR) {
-                enqueue(&task_queue, entry_abspath);
-                printf("[%d] ENQUEUE %s\n", id, entry_abspath);
+            if (system(cmd) == 0) {
+                printf("[%d] PRESENT %s\n", id, entry_abspath);
             } else {
-                strncpy(cmd, base_cmd, base_cmd_len+1);
-                strncat(cmd, "\"", 2);
-                strncat(cmd, entry_abspath, MAX_ABSPATH_LEN);
-                strncat(cmd, "\"", 2);
-
-                if (system(cmd) == 0) {
-                    printf("[%d] PRESENT %s\n", id, entry_abspath);
-                } else {
-                    printf("[%d] ABSENT %s\n", id, entry_abspath);
-                }
+                printf("[%d] ABSENT %s\n", id, entry_abspath);
             }
         }
-        closedir(curdir);
     }
+    closedir(curdir);
+
+    return didWork;
+}
+
+void worker(void *vid) {
+    int id = *((int *) vid);
+    int was_idle = 0;
+    while (!is_done) {
+        int didWork = grepNextDir(id);
+        if (!didWork && !was_idle) {
+            incrementIdle(&task_queue);
+            was_idle = 1;
+        } else if (didWork && was_idle) {
+            decrementIdle(&task_queue);
+            was_idle = 0;
+        }
+
+        if (task_queue.numIdleWorkers == N) {
+            is_done = 1;
+        }
+    }
+
+    printf("[%d] DONE\n", id);
 }
 
 int main(int argc, char *argv[]) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
     const char *grep_bin = "grep";
-    const int N = strtol(argv[1], NULL, 10);
+    N = strtol(argv[1], NULL, 10);
     const char *rootpath = argv[2];
     const char *searchstr = argv[3];
 
@@ -161,6 +199,8 @@ int main(int argc, char *argv[]) {
     strncat(base_cmd, searchstr, MAX_ABSPATH_LEN);
     strncat(base_cmd, "\" ", 3);
     base_cmd_len = strlen(base_cmd);
+
+    is_done = 0;
 
     pthread_t tid[N];
     int id[N];
