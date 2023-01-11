@@ -9,6 +9,9 @@
 
 #define MAX_ABSPATH_LEN 250
 
+char base_cmd[1024];
+int base_cmd_len;
+
 struct task_node {
     char *abspath;
     struct task_node *next;
@@ -82,6 +85,43 @@ int is_empty(struct task_queue *tq) {
     return tq->head == NULL;
 }
 
+void worker(int id) {
+    while (!is_empty(&task_queue)) {
+        char curpath[MAX_ABSPATH_LEN];
+        char cmd[1024];
+
+        if (dequeue(&task_queue, curpath) == -1)
+            continue;
+
+        DIR *curdir = opendir(curpath);
+        struct dirent *entry;
+        while ((entry = readdir(curdir)) != NULL) {
+            char *base_name = strrchr(entry->d_name, '/');
+            base_name = base_name ? base_name+1 : entry->d_name;
+            if (strcmp(base_name, ".") == 0 || strcmp(base_name, "..") == 0)
+                continue;
+
+            char *entry_abspath = make_abspath(curpath, base_name);
+            if (entry->d_type == DT_DIR) {
+                enqueue(&task_queue, entry_abspath);
+                printf("[%d] ENQUEUE %s\n", id, entry_abspath);
+            } else {
+                strncpy(cmd, base_cmd, base_cmd_len+1);
+                strncat(cmd, "\"", 2);
+                strncat(cmd, entry_abspath, MAX_ABSPATH_LEN);
+                strncat(cmd, "\"", 2);
+
+                if (system(cmd) == 0) {
+                    printf("[%d] PRESENT %s\n", id, entry_abspath);
+                } else {
+                    printf("[%d] ABSENT %s\n", id, entry_abspath);
+                }
+            }
+        }
+        closedir(curdir);
+    }
+}
+
 int main(int argc, char *argv[]) {
     setvbuf(stdout, NULL, _IONBF, 0);
 
@@ -101,48 +141,14 @@ int main(int argc, char *argv[]) {
     enqueue(&task_queue, make_abspath(getcwd(buf, MAX_ABSPATH_LEN), rootpath));
 
     // construct base command: grep > /dev/null "searchstr"
-    char base_cmd[1024];
     strncpy(base_cmd, grep_bin, 5);
     // // strncat(base_cmd, " \"", 3);
     strncat(base_cmd, " > /dev/null \"", 15);
     strncat(base_cmd, searchstr, MAX_ABSPATH_LEN);
     strncat(base_cmd, "\" ", 3);
-    int base_cmd_len = strlen(base_cmd);
+    base_cmd_len = strlen(base_cmd);
 
-    while (!is_empty(&task_queue)) {
-        char curpath[MAX_ABSPATH_LEN];
-        char cmd[1024];
-
-        if (dequeue(&task_queue, curpath) == -1)
-            continue;
-
-        DIR *curdir = opendir(curpath);
-        struct dirent *entry;
-        while ((entry = readdir(curdir)) != NULL) {
-            char *base_name = strrchr(entry->d_name, '/');
-            base_name = base_name ? base_name+1 : entry->d_name;
-            if (strcmp(base_name, ".") == 0 || strcmp(base_name, "..") == 0)
-                continue;
-
-            char *entry_abspath = make_abspath(curpath, base_name);
-            if (entry->d_type == DT_DIR) {
-                enqueue(&task_queue, entry_abspath);
-                printf("[0] ENQUEUE %s\n", entry_abspath);
-            } else {
-                strncpy(cmd, base_cmd, base_cmd_len+1);
-                strncat(cmd, "\"", 2);
-                strncat(cmd, entry_abspath, MAX_ABSPATH_LEN);
-                strncat(cmd, "\"", 2);
-
-                if (system(cmd) == 0) {
-                    printf("[0] PRESENT %s\n", entry_abspath);
-                } else {
-                    printf("[0] ABSENT %s\n", entry_abspath);
-                }
-            }
-        }
-        closedir(curdir);
-    }
+    worker(0);
 
     return 0;
 }
