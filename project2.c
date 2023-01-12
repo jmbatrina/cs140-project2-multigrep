@@ -168,7 +168,6 @@ int grepNextDir(int id) {
             strncpy(cmd, base_cmd, base_cmd_len+1);
             strncat(cmd, buf, MAX_ABSPATH_LEN);
 
-            printf("\t\tCMD: %s\n", cmd);
             if (system(cmd) == 0) {
                 printf("[%d] PRESENT %s\n", id, entry_abspath);
             } else {
@@ -195,7 +194,6 @@ void wakeup_threads(struct task_queue *tq, int onlyWakeIdle) {
 
 void worker(void *vid) {
     int id = *((int *) vid);
-    int was_idle = 0;
     while (!task_queue.is_done) {
         pthread_mutex_lock(&task_queue.thread_lock[id]);
 
@@ -205,7 +203,6 @@ void worker(void *vid) {
         } else {
             task_queue.thread_state[id] = DIDWORK;
             if (!is_empty(&task_queue)) {
-                printf("[%d] IDLE RESET\n", id);
                 wakeup_threads(&task_queue, 1);
             }
         }
@@ -225,18 +222,14 @@ void worker(void *vid) {
         }
 
         if (all_ran) {
-            printf("[%d] NEW BATCH RESET\n", id);
             wakeup_threads(&task_queue, 0);
         }
 
         if (all_idle && is_empty(&task_queue)) {
             task_queue.is_done = 1;
-            printf("[%d] DONE RESET\n", id);
             wakeup_threads(&task_queue, 0);
         }
     }
-
-    printf("[%d] DONE\n", id);
 }
 
 int main(int argc, char *argv[]) {
@@ -247,11 +240,11 @@ int main(int argc, char *argv[]) {
     char *rootpath = argv[2];
     const char *searchstr = argv[3];
 
-    printf("grep_bin: %s\n", grep_bin);
-    printf("N: %d\n", N);
-    printf("rootpath: %s\n", rootpath);
-    printf("searchstr: %s\n", searchstr);
-    printf("\n");
+    // printf("grep_bin: %s\n", grep_bin);
+    // printf("N: %d\n", N);
+    // printf("rootpath: %s\n", rootpath);
+    // printf("searchstr: %s\n", searchstr);
+    // printf("\n");
 
     init_queue(&task_queue, N);
     char buf[MAX_ABSPATH_LEN];
@@ -265,7 +258,6 @@ int main(int argc, char *argv[]) {
     strncat(base_cmd, " ", 2);
     base_cmd_len = strlen(base_cmd);
 
-    printf("base_cmd: %s\n", base_cmd);
     pthread_t tid[N];
     int id[N];
     for (int i = 0; i < N; ++i) {
