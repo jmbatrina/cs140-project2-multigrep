@@ -229,18 +229,12 @@ void worker(void *vid) {
 }
 
 int main(int argc, char *argv[]) {
-    // setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stdout, NULL, _IONBF, 0);
 
     const char *grep_bin = "grep";
     const int N = strtol(argv[1], NULL, 10);
     char *rootpath = argv[2];
     const char *searchstr = argv[3];
-
-    // printf("grep_bin: %s\n", grep_bin);
-    // printf("N: %d\n", N);
-    // printf("rootpath: %s\n", rootpath);
-    // printf("searchstr: %s\n", searchstr);
-    // printf("\n");
 
     init_queue(&task_queue, N);
     char buf[MAX_ABSPATH_LEN];
@@ -248,7 +242,6 @@ int main(int argc, char *argv[]) {
 
     // construct base command: grep > /dev/null "searchstr"
     strncpy(base_cmd, grep_bin, 5);
-    // // strncat(base_cmd, " ", 2);
     strncat(base_cmd, " > /dev/null ", 14);
     strncat(base_cmd, escape_special_chars(searchstr, buf), MAX_ABSPATH_LEN);
     strncat(base_cmd, " ", 2);
