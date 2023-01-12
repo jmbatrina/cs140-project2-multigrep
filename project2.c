@@ -140,10 +140,6 @@ int is_empty(struct task_queue *tq) {
     return tq->head == NULL;
 }
 
-void setThreadState(struct task_queue *tq, int id, enum THRD_STATE state) {
-    tq->thread_state[id] = state;
-}
-
 int grepNextDir(int id) {
     char curpath[MAX_ABSPATH_LEN];
     char cmd[1024];
@@ -185,6 +181,18 @@ int grepNextDir(int id) {
     return didWork;
 }
 
+void wakeup_threads(struct task_queue *tq, int onlyWakeIdle) {
+    for (int i = 0; i < task_queue.N; ++i) {
+        if (task_queue.thread_state[i] != READY) {
+            if (onlyWakeIdle && task_queue.thread_state[i] != IDLE)
+                continue;
+
+            task_queue.thread_state[i] = READY;
+            pthread_mutex_unlock(&task_queue.thread_lock[i]);
+        }
+    }
+}
+
 void worker(void *vid) {
     int id = *((int *) vid);
     int was_idle = 0;
@@ -193,25 +201,18 @@ void worker(void *vid) {
 
         int didWork = grepNextDir(id);
         if (!didWork) {
-            setThreadState(&task_queue, id, IDLE);
+            task_queue.thread_state[id] = IDLE;
         } else {
-            setThreadState(&task_queue, id, DIDWORK);
+            task_queue.thread_state[id] = DIDWORK;
             if (!is_empty(&task_queue)) {
                 printf("[%d] IDLE RESET\n", id);
-                for (int i = 0; i < task_queue.N; ++i) {
-                    if (task_queue.thread_state[i] == IDLE) {
-                        task_queue.thread_state[i] = READY;
-                        pthread_mutex_unlock(&task_queue.thread_lock[i]);
-                    }
-                }
+                wakeup_threads(&task_queue, 1);
             }
         }
 
-        // printf("[%d]", id);
         int all_ran = 1;
         int all_idle = 1;
         for (int i = 0; i < task_queue.N; ++i) {
-            // printf(" %d", task_queue.thread_state[i]);
             switch (task_queue.thread_state[i]) {
             case READY:
                 all_ran = 0;
@@ -222,27 +223,16 @@ void worker(void *vid) {
                 ;      // do nothing
             }
         }
-        // printf("\n");
 
         if (all_ran) {
             printf("[%d] NEW BATCH RESET\n", id);
-            for (int i = 0; i < task_queue.N; ++i) {
-                if (task_queue.thread_state[i] != READY) {
-                    task_queue.thread_state[i] = READY;
-                    pthread_mutex_unlock(&task_queue.thread_lock[i]);
-                }
-            }
+            wakeup_threads(&task_queue, 0);
         }
 
         if (all_idle && is_empty(&task_queue)) {
             task_queue.is_done = 1;
             printf("[%d] DONE RESET\n", id);
-            for (int i = 0; i < task_queue.N; ++i) {
-                if (task_queue.thread_state[i] != READY) {
-                    task_queue.thread_state[i] = READY;
-                    pthread_mutex_unlock(&task_queue.thread_lock[i]);
-                }
-            }
+            wakeup_threads(&task_queue, 0);
         }
     }
 
