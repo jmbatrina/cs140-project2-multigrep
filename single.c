@@ -119,11 +119,11 @@ int dequeue(struct task_queue *tq, char *buf) {
         free(removed->abspath);     // deallocate original abspath string
 
         if (tq->head == tq->tail) {
-            // dequeued only element, set queue to empty
+            // dequeued last element, set queue to empty
             tq->head = NULL;
             tq->tail = NULL;
         } else {
-            //
+            // dequeue current head; advance head to next element
             tq->head = tq->head->next;
         }
         // deallocate node AFTER updating since we needed tq->head->next
