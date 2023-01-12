@@ -33,7 +33,30 @@ void init_queue(struct task_queue *tq) {
     tq->tail = NULL;
 }
 
-char *make_abspath(const char * parent_abspath, const char *path) {
+char *escape_special_chars(const char *string, char *buf) {
+    int len = strlen(string);
+    char *start = (char *)string;
+    char *end;
+    strncpy(buf, "'", 2);
+    while ((end = strchr(start, '\'')) != NULL) {
+        strncat(buf, start, end-start);
+        strncat(buf, "'\"'\"'", 6);
+        start = end+1;
+    }
+    if (start != NULL) {
+        strncat(buf, start, (string+len)-start+1);
+    }
+    strncat(buf, "'", 2);
+
+    return buf;
+}
+
+char *make_abspath(const char *parent_abspath, char *path) {
+    char *lastChar = path + strlen(path)-1;
+    if (*lastChar == '/') {
+        *lastChar = '\0';
+    }
+
     char *abspath = (char *) malloc(MAX_ABSPATH_LEN * sizeof(char));
     if (path[0] == '/') {
         strncpy(abspath, path, MAX_ABSPATH_LEN);
@@ -136,10 +159,10 @@ int grepNextDir(int id) {
             printf("[%d] ENQUEUE %s\n", id, entry_abspath);
             didWork = 1;
         } else {
+            char buf[MAX_ABSPATH_LEN];
+            escape_special_chars(entry_abspath, buf);
             strncpy(cmd, base_cmd, base_cmd_len+1);
-            strncat(cmd, "\"", 2);
-            strncat(cmd, entry_abspath, MAX_ABSPATH_LEN);
-            strncat(cmd, "\"", 2);
+            strncat(cmd, buf, MAX_ABSPATH_LEN);
 
             if (system(cmd) == 0) {
                 printf("[%d] PRESENT %s\n", id, entry_abspath);
@@ -179,7 +202,7 @@ int main(int argc, char *argv[]) {
 
     const char *grep_bin = "grep";
     N = strtol(argv[1], NULL, 10);
-    const char *rootpath = argv[2];
+    char *rootpath = argv[2];
     const char *searchstr = argv[3];
 
     printf("grep_bin: %s\n", grep_bin);
@@ -194,10 +217,10 @@ int main(int argc, char *argv[]) {
 
     // construct base command: grep > /dev/null "searchstr"
     strncpy(base_cmd, grep_bin, 5);
-    // // strncat(base_cmd, " \"", 3);
-    strncat(base_cmd, " > /dev/null \"", 15);
-    strncat(base_cmd, searchstr, MAX_ABSPATH_LEN);
-    strncat(base_cmd, "\" ", 3);
+    // // strncat(base_cmd, " ", 2);
+    strncat(base_cmd, " > /dev/null ", 14);
+    strncat(base_cmd, escape_special_chars(searchstr, buf), MAX_ABSPATH_LEN);
+    strncat(base_cmd, " ", 2);
     base_cmd_len = strlen(base_cmd);
 
     is_done = 0;
