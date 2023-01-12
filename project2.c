@@ -31,6 +31,7 @@ struct task_queue {
 
     enum THRD_STATE thread_state[MAX_THREADS];
     pthread_mutex_t thread_lock[MAX_THREADS];
+    pthread_mutex_t checklock;
     int N;
     int is_done;
 } task_queue;
@@ -196,16 +197,12 @@ void worker(void *vid) {
     int id = *((int *) vid);
     while (!task_queue.is_done) {
         pthread_mutex_lock(&task_queue.thread_lock[id]);
+        const int didWork = grepNextDir(id);
+        task_queue.thread_state[id] = didWork? DIDWORK : IDLE;
 
-        int didWork = grepNextDir(id);
-        if (!didWork) {
-            task_queue.thread_state[id] = IDLE;
-        } else {
-            task_queue.thread_state[id] = DIDWORK;
-            if (!is_empty(&task_queue)) {
-                wakeup_threads(&task_queue, 1);
-            }
-        }
+        pthread_mutex_lock(&task_queue.checklock);
+        if (didWork && !is_empty(&task_queue))
+            wakeup_threads(&task_queue, 1);
 
         int all_ran = 1;
         int all_idle = 1;
@@ -215,20 +212,19 @@ void worker(void *vid) {
                 all_ran = 0;
             case DIDWORK:
                 all_idle = 0;
-                break;
             default:
                 ;      // do nothing
             }
         }
 
-        if (all_ran) {
+        if (all_ran)
             wakeup_threads(&task_queue, 0);
-        }
 
         if (all_idle && is_empty(&task_queue)) {
             task_queue.is_done = 1;
             wakeup_threads(&task_queue, 0);
         }
+        pthread_mutex_unlock(&task_queue.checklock);
     }
 }
 
