@@ -7,12 +7,17 @@
 #include <unistd.h>
 #include <assert.h>
 
-#define MAX_ABSPATH_LEN 250
+#define MAX_ABSPATH_LEN 250*2
+#define MAX_THREADS 8
 
 char base_cmd[1024];
 int base_cmd_len;
-int is_done;
-int N;
+
+enum THRD_STATE {
+    READY = 0,
+    IDLE = 1,
+    DIDWORK = 2
+};
 
 struct task_node {
     char *abspath;
@@ -21,16 +26,27 @@ struct task_node {
 
 struct task_queue {
     pthread_mutex_t lock;
-    int numIdleWorkers;
     struct task_node *head;
     struct task_node *tail;
+
+    enum THRD_STATE thread_state[MAX_THREADS];
+    pthread_mutex_t thread_lock[MAX_THREADS];
+    int N;
+    int is_done;
 } task_queue;
 
-void init_queue(struct task_queue *tq) {
+void init_queue(struct task_queue *tq, int N) {
     pthread_mutex_init(&tq->lock, NULL);
-    tq->numIdleWorkers = 0;
     tq->head = NULL;
     tq->tail = NULL;
+
+    tq->N = N;
+    tq->is_done = 0;
+
+    for (int i = 0; i < MAX_THREADS; ++i) {
+        tq->thread_state[i] = 0;
+        pthread_mutex_init(&tq->thread_lock[i], NULL);
+    }
 }
 
 char *escape_special_chars(const char *string, char *buf) {
@@ -124,16 +140,8 @@ int is_empty(struct task_queue *tq) {
     return tq->head == NULL;
 }
 
-void incrementIdle(struct task_queue *tq) {
-    pthread_mutex_lock(&tq->lock);
-    ++tq->numIdleWorkers;
-    pthread_mutex_unlock(&tq->lock);
-}
-
-void decrementIdle(struct task_queue *tq) {
-    pthread_mutex_lock(&tq->lock);
-    --tq->numIdleWorkers;
-    pthread_mutex_unlock(&tq->lock);
+void setThreadState(struct task_queue *tq, int id, enum THRD_STATE state) {
+    tq->thread_state[id] = state;
 }
 
 int grepNextDir(int id) {
@@ -164,6 +172,7 @@ int grepNextDir(int id) {
             strncpy(cmd, base_cmd, base_cmd_len+1);
             strncat(cmd, buf, MAX_ABSPATH_LEN);
 
+            printf("\t\tCMD: %s\n", cmd);
             if (system(cmd) == 0) {
                 printf("[%d] PRESENT %s\n", id, entry_abspath);
             } else {
@@ -179,18 +188,61 @@ int grepNextDir(int id) {
 void worker(void *vid) {
     int id = *((int *) vid);
     int was_idle = 0;
-    while (!is_done) {
+    while (!task_queue.is_done) {
+        pthread_mutex_lock(&task_queue.thread_lock[id]);
+
         int didWork = grepNextDir(id);
-        if (!didWork && !was_idle) {
-            incrementIdle(&task_queue);
-            was_idle = 1;
-        } else if (didWork && was_idle) {
-            decrementIdle(&task_queue);
-            was_idle = 0;
+        if (!didWork) {
+            setThreadState(&task_queue, id, IDLE);
+        } else {
+            setThreadState(&task_queue, id, DIDWORK);
+            if (!is_empty(&task_queue)) {
+                printf("[%d] IDLE RESET\n", id);
+                for (int i = 0; i < task_queue.N; ++i) {
+                    if (task_queue.thread_state[i] == IDLE) {
+                        task_queue.thread_state[i] = READY;
+                        pthread_mutex_unlock(&task_queue.thread_lock[i]);
+                    }
+                }
+            }
         }
 
-        if (task_queue.numIdleWorkers == N) {
-            is_done = 1;
+        // printf("[%d]", id);
+        int all_ran = 1;
+        int all_idle = 1;
+        for (int i = 0; i < task_queue.N; ++i) {
+            // printf(" %d", task_queue.thread_state[i]);
+            switch (task_queue.thread_state[i]) {
+            case READY:
+                all_ran = 0;
+            case DIDWORK:
+                all_idle = 0;
+                break;
+            default:
+                ;      // do nothing
+            }
+        }
+        // printf("\n");
+
+        if (all_ran) {
+            printf("[%d] NEW BATCH RESET\n", id);
+            for (int i = 0; i < task_queue.N; ++i) {
+                if (task_queue.thread_state[i] != READY) {
+                    task_queue.thread_state[i] = READY;
+                    pthread_mutex_unlock(&task_queue.thread_lock[i]);
+                }
+            }
+        }
+
+        if (all_idle && is_empty(&task_queue)) {
+            task_queue.is_done = 1;
+            printf("[%d] DONE RESET\n", id);
+            for (int i = 0; i < task_queue.N; ++i) {
+                if (task_queue.thread_state[i] != READY) {
+                    task_queue.thread_state[i] = READY;
+                    pthread_mutex_unlock(&task_queue.thread_lock[i]);
+                }
+            }
         }
     }
 
@@ -198,10 +250,10 @@ void worker(void *vid) {
 }
 
 int main(int argc, char *argv[]) {
-    setvbuf(stdout, NULL, _IONBF, 0);
+    // setvbuf(stdout, NULL, _IONBF, 0);
 
     const char *grep_bin = "grep";
-    N = strtol(argv[1], NULL, 10);
+    const int N = strtol(argv[1], NULL, 10);
     char *rootpath = argv[2];
     const char *searchstr = argv[3];
 
@@ -211,7 +263,7 @@ int main(int argc, char *argv[]) {
     printf("searchstr: %s\n", searchstr);
     printf("\n");
 
-    init_queue(&task_queue);
+    init_queue(&task_queue, N);
     char buf[MAX_ABSPATH_LEN];
     enqueue(&task_queue, make_abspath(getcwd(buf, MAX_ABSPATH_LEN), rootpath));
 
@@ -223,8 +275,7 @@ int main(int argc, char *argv[]) {
     strncat(base_cmd, " ", 2);
     base_cmd_len = strlen(base_cmd);
 
-    is_done = 0;
-
+    printf("base_cmd: %s\n", base_cmd);
     pthread_t tid[N];
     int id[N];
     for (int i = 0; i < N; ++i) {
