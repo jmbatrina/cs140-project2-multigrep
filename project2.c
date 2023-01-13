@@ -43,6 +43,7 @@ struct task_queue {
 
 void init_queue(struct task_queue *tq, int N) {
     pthread_mutex_init(&tq->lock, NULL);
+    pthread_mutex_init(&tq->checklock, NULL);
     tq->head = NULL;
     tq->tail = NULL;
 
@@ -53,55 +54,6 @@ void init_queue(struct task_queue *tq, int N) {
         tq->thread_state[i] = READY;
         pthread_mutex_init(&tq->thread_lock[i], NULL);
     }
-}
-
-char *escape_special_chars(const char *string, char *buf) {
-    int len = strlen(string);
-    char *start = (char *)string;
-    char *end;
-
-    // wrap string with ' (single quotes) to escape (most) special chars
-    strncpy(buf, "'", 2);
-    // However, we need to escape single quotes (') that appear inside the string
-    // This is done by ending the current string segment, via ' (single quote)
-    // wrap the single quote as another string segment "'", then start another
-    // escaped string segment with a single quote '
-    while ((end = strchr(start, '\'')) != NULL) {   // find each ' inside string
-        strncat(buf, start, end-start); // copy chars from uncopied segment upto BEFORE '
-        strncat(buf, "'\"'\"'", 6);     // single quote "escaped" with double quotes
-        start = end+1;                  // next string segment starts AFTER '
-    }
-
-    // if start is not equal to end of string (string+len, null terminating byte)
-    // then we have a remaining uncopied segment, which we simply append
-    if (start != (string+len))
-        strncat(buf, start, (string+len)-start);
-    // close escaped string with '
-    strncat(buf, "'", 2);
-
-    return buf;
-}
-
-char *make_abspath(const char *parent_abspath, char *path) {
-    // Normalize path: strip possible / at end by overwriting with null byte
-    char *lastChar = path + strlen(path)-1;
-    if (*lastChar == '/') {
-        *lastChar = '\0';
-    }
-
-    // always allocate new space for created string since it will be enqueued
-    char *abspath = (char *) malloc(MAX_ABSPATH_LEN * sizeof(char));
-    if (path[0] == '/') {
-        // already absolute path, simply make copy
-        strncpy(abspath, path, MAX_ABSPATH_LEN);
-    } else {
-        // join parent_abspath and path with path separator /
-        strncpy(abspath, parent_abspath, MAX_ABSPATH_LEN);
-        strncat(abspath, "/", 2);
-        strncat(abspath, path, MAX_ABSPATH_LEN);
-    }
-
-    return abspath;
 }
 
 void enqueue(struct task_queue *tq, char *abspath) {
@@ -165,6 +117,71 @@ int dequeue(struct task_queue *tq, char *buf) {
 
 int is_empty(struct task_queue *tq) {
     return tq->head == NULL;
+}
+
+void destroy_queue(struct task_queue *tq) {
+    pthread_mutex_destroy(&tq->lock);
+    pthread_mutex_destroy(&tq->checklock);
+
+    // ensure all nodes/strings remaining in task queue are deallocated
+    char discard[MAX_ABSPATH_LEN];
+    while (!is_empty(tq)) {
+        dequeue(tq, discard);
+    }
+
+    // destroy mutexes for each worker thread
+    for (int i = 0; i < MAX_THREADS; ++i) {
+        pthread_mutex_destroy(&tq->thread_lock[i]);
+    }
+}
+
+char *escape_special_chars(const char *string, char *buf) {
+    int len = strlen(string);
+    char *start = (char *)string;
+    char *end;
+
+    // wrap string with ' (single quotes) to escape (most) special chars
+    strncpy(buf, "'", 2);
+    // However, we need to escape single quotes (') that appear inside the string
+    // This is done by ending the current string segment, via ' (single quote)
+    // wrap the single quote as another string segment "'", then start another
+    // escaped string segment with a single quote '
+    while ((end = strchr(start, '\'')) != NULL) {   // find each ' inside string
+        strncat(buf, start, end-start); // copy chars from uncopied segment upto BEFORE '
+        strncat(buf, "'\"'\"'", 6);     // single quote "escaped" with double quotes
+        start = end+1;                  // next string segment starts AFTER '
+    }
+
+    // if start is not equal to end of string (string+len, null terminating byte)
+    // then we have a remaining uncopied segment, which we simply append
+    if (start != (string+len))
+        strncat(buf, start, (string+len)-start);
+    // close escaped string with '
+    strncat(buf, "'", 2);
+
+    return buf;
+}
+
+char *make_abspath(const char *parent_abspath, char *path) {
+    // Normalize path: strip possible / at end by overwriting with null byte
+    char *lastChar = path + strlen(path)-1;
+    if (*lastChar == '/') {
+        *lastChar = '\0';
+    }
+
+    // always allocate new space for created string since it will be enqueued
+    char *abspath = (char *) malloc(MAX_ABSPATH_LEN * sizeof(char));
+    if (path[0] == '/') {
+        // already absolute path, simply make copy
+        strncpy(abspath, path, MAX_ABSPATH_LEN);
+    } else {
+        // join parent_abspath and path with path separator /
+        strncpy(abspath, parent_abspath, MAX_ABSPATH_LEN);
+        strncat(abspath, "/", 2);
+        strncat(abspath, path, MAX_ABSPATH_LEN);
+    }
+
+    return abspath;
 }
 
 int grepNextDir(struct task_queue *tq, int id) {
@@ -310,6 +327,10 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < N; ++i) {
         pthread_join(tid[i], NULL);
     }
+
+    // We are done, ensure mutex and remaining nodes (if any)
+    // in the task queue are destroyed/deallocated
+    destroy_queue(&task_queue);
 
     return 0;
 }
