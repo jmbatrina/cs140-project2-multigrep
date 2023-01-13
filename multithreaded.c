@@ -8,12 +8,14 @@
 #include <unistd.h>     // for getcwd()
 
 // Max absolute path length is 250, but allocate space for escaping special chars
-#define MAX_ABSPATH_LEN (250+50)
+#define MAX_ABSPATH_LEN 250
+#define MAX_ESCAPED_ABSPATH_LEN (MAX_ABSPATH_LEN*4)
+#define MAX_CMD_LEN (MAX_ABSPATH_LEN*5)
 #define MAX_THREADS 8
 
 
 // base command prefix used for all grep invocations
-char base_cmd[1024];
+char base_cmd[MAX_CMD_LEN];
 int base_cmd_len;
 
 // Worker thread state, with respect to ENQUEUE workload
@@ -186,7 +188,7 @@ char *make_abspath(const char *parent_abspath, char *path) {
 
 int grepNextDir(struct task_queue *tq, int id) {
     char curpath[MAX_ABSPATH_LEN];
-    char cmd[1024];
+    char cmd[MAX_CMD_LEN];
 
     if (is_empty(tq) || dequeue(tq, curpath) == -1) {
         return 0;       // queue is empty, standby
@@ -219,9 +221,9 @@ int grepNextDir(struct task_queue *tq, int id) {
             strncpy(cmd, base_cmd, base_cmd_len+1); // +1 for null terminating byte
 
             // BUT escape searchfile for shell
-            char buf[MAX_ABSPATH_LEN];
+            char buf[MAX_ESCAPED_ABSPATH_LEN];
             escape_special_chars(entry_abspath, buf);
-            strncat(cmd, buf, MAX_ABSPATH_LEN);     // append escaped filepath
+            strncat(cmd, buf, MAX_ESCAPED_ABSPATH_LEN);     // append escaped filepath
 
             if (system(cmd) == 0) {     // grep returns 0 for success
                 printf("[%d] PRESENT %s\n", id, entry_abspath);
@@ -307,12 +309,12 @@ int main(int argc, char *argv[]) {
 
     init_queue(&task_queue, N);
     // enqueue rootpath; ensure it is an absolute path
-    char buf[MAX_ABSPATH_LEN];
+    char buf[MAX_ESCAPED_ABSPATH_LEN];
     enqueue(&task_queue, make_abspath(getcwd(buf, MAX_ABSPATH_LEN), rootpath));
 
     // construct base command: grep > /dev/null 'escaped_searchstr'
     strncpy(base_cmd, "grep > /dev/null ", 18);
-    strncat(base_cmd, escape_special_chars(searchstr, buf), MAX_ABSPATH_LEN);
+    strncat(base_cmd, escape_special_chars(searchstr, buf), MAX_ESCAPED_ABSPATH_LEN);
     strncat(base_cmd, " ", 2);      // pre-add space for searchfile
     base_cmd_len = strlen(base_cmd);
 
