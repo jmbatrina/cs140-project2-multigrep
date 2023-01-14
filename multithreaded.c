@@ -26,7 +26,7 @@ enum THRD_STATE {
 };
 
 struct task_node {
-    char *abspath;  // escaped absolute path of dir
+    char *abspath;  // absolute path of dir
     struct task_node *next;
 };
 

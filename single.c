@@ -17,7 +17,7 @@ char base_cmd[MAX_CMD_LEN];
 int base_cmd_len;
 
 struct task_node {
-    char *abspath;  // escaped absolute path of dir
+    char *abspath;  // absolute path of dir
     struct task_node *next;
 };
 
