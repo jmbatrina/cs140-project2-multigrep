@@ -208,7 +208,7 @@ int main(int argc, char *argv[]) {
 
     init_queue(&task_queue);
     // enqueue rootpath; ensure it is an absolute path
-    char buf[MAX_ESCAPED_ABSPATH_LEN];
+    char buf[MAX_ABSPATH_LEN];
     enqueue(&task_queue, make_abspath(getcwd(buf, MAX_ABSPATH_LEN), rootpath));
 
     // construct base command: grep > /dev/null 'escaped_searchstr'
