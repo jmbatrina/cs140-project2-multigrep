@@ -200,8 +200,6 @@ int grepNextDir(struct task_queue *tq, int id) {
 }
 
 int main(int argc, char *argv[]) {
-    setvbuf(stdout, NULL, _IONBF, 0);
-
     // get parameters from commandline args
     // N is in base 10; assume whole argv[1] is valid number
     // const int N = strtol(argv[1], NULL, 10); // NOTE: N is IGNORED
